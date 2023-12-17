@@ -29,8 +29,71 @@ exports.register = catchAsync(async(req,res,next)=>{
         return next(new appError("this email already used"))
     }
     const user = await User.create({firstName,lastName,email,password,role})
-    createAndSendToken(user,200,res)
+    const verificationToken = await user.createEmailVerificationToken()
+    await user.save({validateBeforeSave: false})
+    try{    
+        await sendEmail({ email: user.email, subject: `verify your email (for 10 minutes)`, token: verificationToken })
+        res.status(200).json({
+            status: `success`,
+            message: `token send to email`
+        })
+    }catch(error){
+        user.verificationToken = null 
+        await user.save({ validateBeforeSave: false })
+        return next(new appError("there was an error sending the email , try again", 500))
+    }
+    
+    
 })
+
+exports.verify = catchAsync(async(req,res,next)=>{
+    // take the token from url
+    let token = req.params.token 
+    // verify to check the jwt and get the decoded
+    try{
+        var decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET); /*extract data*/
+    }catch(err){
+        return next(new appError("invalid token"))
+    }
+    // fund user who have the email in the token payload 
+    const user = await User.findOne({email: decoded.email})
+    if (!user){
+        return next(new appError("there is no user with this email",403))
+    }
+    // encode the token to compare it with the one stored in database
+    token = crypto
+    .createHash('sha256')
+    .update(token)
+    .digest('hex');
+    // for more security check the token 
+    if (user.verificationToken != token){
+        return next(new appError("the token dont match the correct token",403))
+    }
+    // verify the user 
+    user.isVerified = true 
+    user.save({validateBeforeSave: false})
+    createAndSendToken(user,200,res)
+    
+})
+
+
+exports.sendVerivicationEmail = catchAsync(async(req,res,next)=>{
+    const user = await User.findOne({email: req.body.email})
+    const verificationToken = await user.createEmailVerificationToken()
+    await user.save({validateBeforeSave: false})
+    try{    
+        await sendEmail({ email: user.email, subject: `verify your email (for 10 minutes)`, token: verificationToken })
+        res.status(200).json({
+            status: `success`,
+            message: `token send to email`
+        })
+    }catch(error){
+        user.verificationToken = null 
+        await user.save({ validateBeforeSave: false })
+        return next(new appError("there was an error sending the email , try again", 500))
+    }
+})
+
 
 exports.login = catchAsync(async(req,res,next)=>{
     const {email,password} = req.body
@@ -121,7 +184,7 @@ exports.forgotPassword = catchAsync(async (req, res, next) => {
     await user.save({ validateBeforeSave: false })
 
     try {
-        await sendEmail({ email: user.email, subject: `your Password reset token (for 10 minutes)`, resetToken })
+        await sendEmail({ email: user.email, subject: `your Password reset token (for 10 minutes)`, token: resetToken })
         res.status(200).json({
             status: `success`,
             message: `token send to email`

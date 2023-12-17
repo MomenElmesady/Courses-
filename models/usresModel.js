@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const validator = require('validator');
 const bcrypt = require("bcrypt")
 const crypto = require("crypto")
+const jwt = require("jsonwebtoken")
 const userSchema = mongoose.Schema({
     firstName: {
         type: String,
@@ -40,7 +41,12 @@ const userSchema = mongoose.Schema({
     cart: [{
         type: mongoose.Schema.Types.ObjectId,
         ref: "Course"
-    }]
+    }],
+    isVerified: {
+        type: Boolean,
+        default: false
+    },
+    verificationToken: String
 }, {
     toJSON: { virtuals: true },
     toObject: { virtuals: true }
@@ -66,6 +72,15 @@ userSchema.methods.createPasswordResetToken = function () {
 
     this.passwordResetExpires = Date.now() + 10 * 60 * 1000;
     return resetToken;
+}
+userSchema.methods.createEmailVerificationToken = async function () {
+    const verificationToken = await jwt.sign({ email: this.email }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN })
+    this.verificationToken = crypto
+        .createHash('sha256')
+        .update(verificationToken)
+        .digest('hex');
+
+    return verificationToken;
 }
 
 module.exports = mongoose.model("User", userSchema);
